@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import { join } from "path";
 import NpmCliPackageJson from "@npmcli/package-json";
 import glob from "fast-glob";
@@ -6,6 +7,7 @@ import semver from "semver";
 
 import * as colors from "../../../../colors";
 import { readConfig } from "../../../../config";
+import { getPreferredPackageManager } from "../../../getPreferredPackageManager";
 import * as jscodeshift from "../../jscodeshift";
 import type { MigrationFunction } from "../../types";
 import type { Dependency } from "./dependency";
@@ -33,11 +35,14 @@ const getRemixVersionSpec = (remixDeps: Dependency[]): string => {
     console.error("❌ I couldn't find versions for your Remix packages.");
     process.exit(1);
   }
+
   if (semver.lt(candidateMin, "1.3.3")) {
     console.log("⬆️  I'm upgrading your Remix dependencies");
     console.log(because("this migration requires v1.3.3 or newer."));
+
     return "^1.3.3";
   }
+
   console.log(
     detected(
       `\`${colors.blue(
@@ -50,7 +55,9 @@ const getRemixVersionSpec = (remixDeps: Dependency[]): string => {
 };
 
 const shouldKeepPostinstall = (original?: string): boolean => {
-  if (original === undefined) return false;
+  if (original === undefined) {
+    return false;
+  }
 
   if (onlyRemixSetup.test(original) || onlyRemixSetupRuntime.test(original)) {
     console.log(
@@ -73,14 +80,14 @@ const shouldKeepPostinstall = (original?: string): boolean => {
   return true;
 };
 
-export const replaceRemixImports: MigrationFunction = async ({
+export const replaceRemixImports: MigrationFunction = async (
   projectDir,
-  flags,
-}) => {
+  flags = {}
+) => {
   let pkg = await NpmCliPackageJson.load(projectDir);
 
   // 0. resolve runtime and adapter
-  let { runtime, adapter } = await resolveTransformOptions(pkg.content);
+  let { adapter, runtime } = await resolveTransformOptions(pkg.content);
 
   let deps = depsToEntries(pkg.content.dependencies);
   let remixDeps = deps.filter(({ name }) => isRemixPackage(name));
@@ -142,13 +149,20 @@ export const replaceRemixImports: MigrationFunction = async ({
   // write updates to package.json
   await pkg.save();
 
-  // 3. Run codemod
+  // 3. Update lockfile for new dependencies by reinstalling
+  console.log("\n💿 I'm updating your lockfile");
+  console.log(because("your dependencies changed."));
+  let packageManager = getPreferredPackageManager();
+  execSync(`${packageManager} install`, { cwd: projectDir, stdio: "inherit" });
+  console.log("✅ Your lockfile looks good!");
+
+  // 4. Run codemod
   console.log("\n💿 I'm replacing any `remix` imports");
   console.log(because("importing from `remix` is deprecated."));
   let config = await readConfig(projectDir);
   let files = glob.sync("**/*.+(js|jsx|ts|tsx)", {
-    cwd: config.appDirectory,
     absolute: true,
+    cwd: config.appDirectory,
   });
   let codemodOk = await jscodeshift.run<Options>({
     files,
@@ -166,8 +180,4 @@ export const replaceRemixImports: MigrationFunction = async ({
   console.log("✅ Your Remix imports look good!");
 
   console.log("\n🚚 I've successfully migrated your project! 🎉");
-  console.log(
-    "\n👉 Reinstall from your updated `package.json` to update your lockfile"
-  );
-  console.log(`   ${colors.blue("npm install")}`);
 };

@@ -1,0 +1,20 @@
+{
+  "routes": [
+    {
+      "route": "/build/*"
+    },
+    {
+      "route": "/favicon.ico"
+    },
+    {
+      "route": "/*",
+      "rewrite": "/api/azure"
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/api/azure"
+  },
+  "platform": {
+    "apiRuntime": "node:14"
+  }
+}
